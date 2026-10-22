@@ -476,22 +476,128 @@ loader.load('./assets/hagia_sophia.glb', (gltf) => {
     scene.add(l);
   }
 
-  // water
-  const water = new Water(new THREE.PlaneGeometry(5200, 5200), {
+  // procedural ocean: subdivided plane + custom reflected water shader
+  const water = new Water(new THREE.PlaneGeometry(5200, 5200, 360, 360), {
     textureWidth: isMobile ? 512 : 1024,
     textureHeight: isMobile ? 512 : 1024,
     waterNormals,
-    sunDirection: new THREE.Vector3(-0.55, 0.06, -0.83).normalize(),
+    sunDirection: new THREE.Vector3(-0.55, 0.08, -0.83).normalize(),
     sunColor: 0xffb27a,
     waterColor: 0x10222b,
     distortionScale: 1.3,
-    fog: true,
+    fog: false,
     alpha: 1.0
   });
   water.rotation.x = -Math.PI / 2;
   water.position.y = -14.0;
-  water.material.uniforms['size'].value = 2.6;
   scene.add(water);
+  const wu = water.material.uniforms;
+  wu.uSunDir = { value: new THREE.Vector3(-0.55, 0.08, -0.83).normalize() };
+  wu.uSunColor = { value: new THREE.Color(0xffb27a) };
+  wu.uFogColor = { value: new THREE.Color(0x2d2438) };
+  wu.uFogDensity = { value: 0.00065 };
+  water.material.vertexShader = /* glsl */`
+    uniform mat4 textureMatrix;
+    uniform float time;
+    varying vec4 vMirrorCoord;
+    varying vec3 vWorldPos;
+    varying vec3 vNormalW;
+    varying float vWave;
+
+    void main() {
+      vec4 base = modelMatrix * vec4(position, 1.0);
+      vec2 p = base.xz;
+
+      // four large directional swells
+      float a1 = 1.25, a2 = 0.75, a3 = 0.40, a4 = 0.18;
+      vec2 d1 = vec2(0.045, 0.022);
+      vec2 d2 = vec2(-0.031, 0.061);
+      vec2 d3 = vec2(0.085, -0.038);
+      vec2 d4 = vec2(-0.120, -0.090);
+      float ph1 = dot(p, d1) + time * 0.55;
+      float ph2 = dot(p, d2) + time * 0.82;
+      float ph3 = dot(p, d3) + time * 1.15;
+      float ph4 = dot(p, d4) + time * 1.60;
+      float h = sin(ph1) * a1 + sin(ph2) * a2 + sin(ph3) * a3 + sin(ph4) * a4;
+      base.y += h;
+
+      vWorldPos = base.xyz;
+      vWave = h;
+      vMirrorCoord = textureMatrix * base;
+
+      float dhx = cos(ph1) * a1 * d1.x + cos(ph2) * a2 * d2.x +
+                  cos(ph3) * a3 * d3.x + cos(ph4) * a4 * d4.x;
+      float dhz = cos(ph1) * a1 * d1.y + cos(ph2) * a2 * d2.y +
+                  cos(ph3) * a3 * d3.y + cos(ph4) * a4 * d4.y;
+      vNormalW = normalize(vec3(-dhx * 2.2, 1.0, -dhz * 2.2));
+
+      gl_Position = projectionMatrix * viewMatrix * base;
+    }
+  `;
+  water.material.fragmentShader = /* glsl */`
+    uniform sampler2D mirrorSampler;
+    uniform float time;
+    uniform float distortionScale;
+    uniform float alpha;
+    uniform vec3 waterColor;
+    uniform vec3 uSunDir;
+    uniform vec3 uSunColor;
+    uniform vec3 uFogColor;
+    uniform float uFogDensity;
+    varying vec4 vMirrorCoord;
+    varying vec3 vWorldPos;
+    varying vec3 vNormalW;
+    varying float vWave;
+
+    void main() {
+      vec2 p = vWorldPos.xz;
+
+      // fine procedural ripples: analytic slopes, animated in time
+      float dhx = 0.0, dhz = 0.0;
+      // 3.5 m
+      dhx += cos(dot(p, vec2(0.88, 0.38)) + time * 2.1) * 0.22 * 0.88;
+      dhz += cos(dot(p, vec2(0.88, 0.38)) + time * 2.1) * 0.22 * 0.38;
+      // 2.2 m
+      dhx += cos(dot(p, vec2(-0.55, 0.95)) + time * 3.0) * 0.14 * -0.55;
+      dhz += cos(dot(p, vec2(-0.55, 0.95)) + time * 3.0) * 0.14 * 0.95;
+      // 1.3 m
+      dhx += cos(dot(p, vec2(1.55, -1.10)) + time * 4.2) * 0.08 * 1.55;
+      dhz += cos(dot(p, vec2(1.55, -1.10)) + time * 4.2) * 0.08 * -1.10;
+      // 0.7 m
+      dhx += cos(dot(p, vec2(-2.3, -1.7)) + time * 5.6) * 0.04 * -2.3;
+      dhz += cos(dot(p, vec2(-2.3, -1.7)) + time * 5.6) * 0.04 * -1.7;
+
+      vec3 n = normalize(vNormalW + vec3(-dhx * 0.9, 0.0, -dhz * 0.9));
+      vec3 V = normalize(cameraPosition - vWorldPos);
+
+      vec2 uv = vMirrorCoord.xy / vMirrorCoord.w;
+      uv += n.xz * (0.016 * distortionScale);
+      vec3 refl = texture2D(mirrorSampler, clamp(uv, 0.002, 0.998)).rgb;
+
+      float fres = pow(1.0 - clamp(dot(n, V), 0.0, 1.0), 3.0);
+      fres = clamp(0.16 + fres * 0.92, 0.0, 0.94);
+      vec3 col = mix(waterColor, refl, fres);
+
+      // sun/evening glitter
+      vec3 H = normalize(uSunDir + V);
+      float spec = pow(max(dot(n, H), 0.0), 240.0) * 2.4;
+      col += uSunColor * spec * 0.9;
+
+      // small crest foam
+      float foam = smoothstep(1.05, 1.65, vWave) * 0.10;
+      col = mix(col, vec3(0.58, 0.68, 0.72), foam);
+
+      // atmospheric fade
+      float dist = length(cameraPosition - vWorldPos);
+      float fog = 1.0 - exp(-uFogDensity * uFogDensity * dist * dist);
+      col = mix(col, uFogColor, clamp(fog, 0.0, 0.92));
+
+      gl_FragColor = vec4(col, alpha);
+      #include <tonemapping_fragment>
+      #include <colorspace_fragment>
+    }
+  `;
+  water.material.needsUpdate = true;
 
   // post
   const composer = new EffectComposer(renderer);

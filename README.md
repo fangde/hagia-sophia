@@ -1,6 +1,6 @@
 # Hagia Sophia — A Hill Above the Bosphorus
 
-An interactive **Three.js** study of Hagia Sophia on a hill above the sea at twilight: a procedural Blender model, exported to glTF, with real-time water reflections, animated ripples, bloom, soft shadows and four cinematic camera presets.
+An interactive **Three.js** study of Hagia Sophia on a hill above the sea at twilight: a procedural Blender model, exported to glTF, with a custom procedural ocean shader, real-time water reflections, bloom, soft shadows and four cinematic camera presets.
 
 **[Live demo → fangde.github.io/hagia-sophia](https://fangde.github.io/hagia-sophia/)**
 
@@ -15,7 +15,7 @@ An interactive **Three.js** study of Hagia Sophia on a hill above the sea at twi
 ## What is inside
 
 - **1,213 mesh nodes** exported from Blender 5.2, merged at runtime by material into **22 draw calls**.
-- **Three.js Water** with a real planar reflection pass, animated normal map and sun glitter.
+- **Custom procedural ocean shader**: four large vertex swells, four analytic fine-ripple bands, a real planar reflection pass, Fresnel mix, animated sun glitter, crest foam and distance fog.
 - Custom **sky shader** (deep blue zenith → mauve → peach horizon), faint stars and a PMREM environment map for the lead dome, gold finials, marble and water.
 - Runtime procedural canvas textures: **ashlar limestone**, hillside grass/earth, terracotta roof tiles and water normals.
 - Warm façade/dome spotlights, low key light with soft shadows, cool rim light, hillside practicals, emissive windows and lamps, and **UnrealBloom** halation.
